@@ -1,0 +1,684 @@
+################
+# This is obtaining topics for the entire dataset - till row 67
+
+## read data in 
+data <- read.csv("C:/Users/Mr. Mosley/Desktop/Master's/Data Mining/Assignment 7/data.csv")
+
+##library packages required to run the code
+library(tm)
+library(SnowballC)
+library(qdap)
+library(topicmodels)
+library(e1071)
+library(randomForest)
+
+## obtaining the text in the "text" column
+text1 <- data[,140]
+## ensuring it has the data frame format
+text <- data.frame(text = text1)
+
+## converts the data frame into a corpus, where we can use the tm package to manipuate the text
+textCorpus <- Corpus(VectorSource(as.character(text$text))) 
+textCorpus 
+
+## applies the pre-processing to the text
+## removes numbers
+textCorpus <- tm_map(textCorpus, removeNumbers)
+## forces all text to be lower case
+textCorpus <- tm_map(textCorpus, tolower)
+## removes all punctuation
+textCorpus <- tm_map(textCorpus, removePunctuation)
+## custom list of stop words
+mystopwords <- c("reuter", "pct", "said", "will")
+## stems the document
+textCorpus <- tm_map(textCorpus, stemDocument)
+## removes standard English stop words as well as my own
+textCorpus <- tm_map(textCorpus, removeWords, c(stopwords("English"), mystopwords))
+##strips the corpus of excess white space
+textCorpus <- tm_map(textCorpus, stripWhitespace)
+
+## ensures the corpus is in a format that the document term matrix can work with
+textCorpus <- tm_map(textCorpus, PlainTextDocument)
+
+##creates a document term matrix, essessentially all the terms in each doucment
+dtm <- DocumentTermMatrix(textCorpus)
+dtm
+dim(dtm)
+
+## this removes all the sparse terms
+dtms <- removeSparseTerms(dtm, 0.98)
+dim(dtms)
+
+## this removes any empty rows
+rowTotals <- apply(dtms , 1, sum)
+zero <- which(rowTotals==0)
+zero
+length(zero)
+dtms  <- dtms[rowTotals> 0, ]
+dim(dtms)
+
+## this performs the LDA with 10 topics
+set.seed(999)
+lda <- LDA(dtms, 10)
+## this prints the top 3 words for each topic
+t = terms(lda,3)
+terms(lda)
+t
+
+######################################################################
+# This is create topic on a subset which is then used to classify
+# Reasons for subset outlined in report
+
+## A vector of the positions of the top 10 classes
+topten <- c(4,23,32,39,49,59,77,112,130,134)
+
+## prepares data for classifying
+classify1 <- data[,c(topten)]
+classify.pre <- data.frame(classify = classify1)
+
+##names the columns
+name <- c("acq","corn","crude","earn","grain","interest","fx","ship","trade","wheat")
+names(classify.pre) <- name
+
+## run a new corpus, omitting observations with no class that falls under "name"
+## this is very similar to before apart from 3 lines down where this removes
+## the rows that essentially have no class
+text1.class <- data[,140]
+text.class <- data.frame(text.class = text1.class)
+text.class <- text.class[ which(rowSums(classify.pre)!=0) , ]
+text.class <- data.frame(text.class=text.class)
+
+textCorpus.class <- Corpus(VectorSource(as.character(text.class$text.class))) 
+textCorpus.class
+
+textCorpus.class <- tm_map(textCorpus.class, removeNumbers)
+textCorpus.class <- tm_map(textCorpus.class, tolower)
+textCorpus.class <- tm_map(textCorpus.class, removePunctuation)
+mystopwords <- c("reuter", "pct", "said", "will")
+textCorpus.class <- tm_map(textCorpus.class, stemDocument)
+textCorpus.class <- tm_map(textCorpus.class, removeWords, c(stopwords("English"), mystopwords))
+textCorpus.class <- tm_map(textCorpus.class, stripWhitespace)
+
+
+
+textCorpus.class <- tm_map(textCorpus.class, PlainTextDocument)
+dtm.class <- DocumentTermMatrix(textCorpus.class)
+dtm.class
+
+
+dim(dtm.class)
+
+dtms.class <- removeSparseTerms(dtm.class, 0.98)
+dtms.class
+dim(dtms.class)
+
+
+rowTotals.class <- apply(dtms.class , 1, sum)
+zero.class <- which(rowTotals.class==0)
+zero.class
+length(zero.class)
+
+dtms.class  <- dtms.class[rowTotals.class> 0, ]
+
+set.seed(999)
+lda.class <- LDA(dtms.class, 10)
+t = terms(lda.class,5)
+terms(lda.class)
+t
+
+## prepares data to be classified
+classify <- classify.pre
+
+## creates an empty variable which will be filled with topic tags
+classify$class  <- 0
+classify$class[classify$acq == 1] <- name[1]
+## keep this here for completetion but as mentioned, the number of tags for corn alone is zero.
+classify$class[classify$corn == 1] <- name[2]
+classify$class[classify$crude == 1] <- name[3]
+classify$class[classify$earn == 1] <- name[4]
+classify$class[classify$grain == 1] <- name[5]
+classify$class[classify$interest == 1] <- name[6]
+classify$class[classify$fx == 1] <- name[7]
+classify$class[classify$ship == 1] <- name[8]
+classify$class[classify$trade == 1] <- name[9]
+## there are 3 observations that are have only a tag for wheat
+## these willbe assigned to grain
+classify$class[classify$wheat == 1] <- name[5]
+
+## removes rows with no class
+classify <- classify[ which(classify$class!=0), ]
+## removes the same rows that were removed in the dtm above, due to sparseness
+classify <- classify[-zero.class,]
+
+## extracts the posterior probability matrix
+gammaDF <- as.data.frame(lda.class@gamma) 
+## ensures the class variable is compatible with the gamma data frame
+classify$class = as.factor(classify$class)
+## joins class to the probability matrix
+gammaDF$class <- classify$class
+
+## runs a SVM model
+model <- svm(class ~., data = gammaDF)
+## creates a confusion matrix
+result_SVM <- table(gammaDF[,11], predict(model, gammaDF[,-11]))
+##presents confusion matrix
+result_SVM
+## returns accuracy
+accuracy_SVM <- sum(result_SVM[row(result_SVM)==col(result_SVM)]/sum(result_SVM))
+
+## similarly, runs a Naive Bayes model
+model_bayes<-naiveBayes(gammaDF[,-11], gammaDF[,11]) 
+## creates confusion matrix
+result_bayes <- table(gammaDF[,11], predict(model_bayes, gammaDF[,-11]))
+##presents matrix
+result_bayes
+## returns the accuracy
+accuracy_bayes <- sum(result_bayes[row(result_bayes)==col(result_bayes)]/sum(result_bayes))
+
+##same again with random forest model
+model_rf<-randomForest(class~., data=gammaDF, ntrees=1000) 
+result_rf <- table(gammaDF[,11], predict(model_rf))
+result_rf
+accuracy_rf <- sum(result_rf[row(result_rf)==col(result_rf)]/sum(result_rf))
+
+################################################################################
+# 10 fold cross validation at 90/10 split - Random Forest model
+## creates randomised data for the cross-fold validation
+set.seed(750)
+mix1_rf<-gammaDF[sample(nrow(gammaDF)),]
+
+## creating the indexes
+folds <- cut(seq(1,nrow(mix1_rf)),breaks=10,labels=FALSE)
+
+## this will be all the confusion matrices
+result_rf <- c()
+## this will be a vector of accuracy for each fold
+accuracy_rf <- c()
+## this will be a matrix of all recall statistic for each variable in each fold
+recall_rf <- matrix(NA, nrow=10, ncol=8)
+## this will be a matrix of all precision statistics for each variable in each fold
+precision_rf <- matrix(NA, nrow=10, ncol=8)
+## this will be a matrix of all diagonal entries in each fold
+lead_rf <- matrix(NA, nrow=10, ncol=8)
+## this will be used to calculate the micro-averaged recall
+recall_mic_rf <- matrix(NA, nrow=10, ncol=8)
+## this will be used to calculate the micro-averaged precision
+precision_mic_rf <- matrix(NA, nrow=10, ncol=8)
+## this will be used to calculate the micro-averaged f-measure
+f_measure_mic_rf <- matrix(NA, nrow=10, ncol=8)
+## this will be a vector to store the recall macro averaged statistics
+recall_mac_rf <- c()
+## this will be a vector to store the precision macro averaged statistics
+precision_mac_rf <- c()
+
+## sets up the 10 fold
+for(i in 1:10){
+  ## this will be the 1st tenth of the data when i is 1, 2nd tenth when i is 2 and so on
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  ## takes 10% of data to be test
+  test <- mix1_rf[testIndexes, ]
+  ## remaining 90% to be training data
+  train <- mix1_rf[-testIndexes, ]
+  ## runs random forest model of training data
+  model<-randomForest(class~., data=train) 
+  ## predicts using test data
+  result_rf[[i]] <- table(test[,11], predict(model, test[,-11]))
+  
+  ## gives accuracy of each fold
+  accuracy_rf[i] <- sum(result_rf[[i]][row(result_rf[[i]])==col(result_rf[[i]])]/sum(result_rf[[i]]))
+  
+  table <- result_rf[[i]]
+  for (j in 1:nrow(table))
+  {
+    ## takes the diagonal values of the confusion matrix
+    lead_rf[i, j] <- table[j,j]
+    ## calculates the recall value of each variable for this fold
+    recall_rf[i,j] <- table[j,j]/sum(table[j,])
+    ## records the sum of the row to use later
+    recall_mic_rf[i, j] <- sum(table[j,])
+    ## similar to recall
+    precision_rf[i,j] <- table[j,j]/sum(table[,j])
+    precision_mic_rf[i, j] <- sum(table[,j])
+    ## calculates f-measure for each variable in this fold
+    f_measure_mic_rf[i, j] <- 2*((precision_rf[i, j]* recall_rf[i, j])/(precision_rf[i, j]+ recall_rf[i, j]))
+    
+  }   
+}
+
+
+
+## this is to replace any NaNs generated by the algorithm above by 0s
+## we get NaNs when we divide by zero. 
+is.nan.data.frame <- function(x)
+  do.call(cbind, lapply(x, is.nan))
+
+f_measure_mic_rf[is.nan(f_measure_mic_rf)] <- 0
+
+## take the sum of all true positives of each variables across the folds
+sum_lead_rf <- c()
+for(i in 1:8){
+  sum_lead_rf[i] <- sum(lead_rf[,i])
+}
+
+## similarly, take the sum of all row sums in each variable (true positive + false negative)
+sum_recall_mic_rf <- c()
+for(i in 1:8){
+  sum_recall_mic_rf[i] <- sum(recall_mic_rf[,i])
+}
+
+## sum of true positives divided by sum of (true positive + false negative). This gives micro-averaged recall
+fin_recall_mic_rf <- c()
+for(i in 1:8){
+  fin_recall_mic_rf[i] <- sum_lead_rf[i]/sum_recall_mic_rf[i]
+}
+
+## very similar to recall
+sum_precision_mic_rf <- c()
+for(i in 1:8){
+  sum_precision_mic_rf[i] <- sum(precision_mic_rf[,i])
+}
+
+fin_precision_mic_rf <- c()
+for(i in 1:8){
+  fin_precision_mic_rf[i] <- sum_lead_rf[i]/sum_precision_mic_rf[i]
+}
+
+fin_f_measure_mic_rf <- c()
+for(i in 1:8){
+  fin_f_measure_mic_rf[i] <- mean(f_measure_mic_rf[,i])
+}
+
+### calculates macro-averaged statistics
+recall_mac_rf <- colMeans(recall_rf)
+precision_mac_rf <- colMeans(precision_rf)
+
+## shows all final values of recall, precision, f-measure and accuracy
+fin_recall_mic_rf
+recall_mac_rf
+fin_precision_mic_rf
+precision_mac_rf
+fin_f_measure_mic_rf
+accuracy_rf
+mean(accuracy_rf)
+
+###############################################################################################
+## 10 fold cross validation for SVM model
+## really similar to the notes made on the random forest 10-fold cross validation
+## model choice change is the only difference
+
+set.seed(750)
+mix_svm<-gammaDF[sample(nrow(gammaDF)),]
+
+folds <- cut(seq(1,nrow(mix_svm)),breaks=10,labels=FALSE)
+#Perform 10 fold cross validation
+result_svm <- c()
+accuracy_svm <- c()
+recall_svm <- matrix(NA, nrow=10, ncol=8)
+precision_svm <- matrix(NA, nrow=10, ncol=8)
+lead_svm <- matrix(NA, nrow=10, ncol=8)
+recall_mic_svm <- matrix(NA, nrow=10, ncol=8)
+precision_mic_svm <- matrix(NA, nrow=10, ncol=8)
+f_measure_mic_svm <- matrix(NA, nrow=10, ncol=8)
+recall_mac_svm <- c()
+precision_mac_svm <- c()
+
+
+for(i in 1:10){
+  #Segement your data by fold using the which() function 
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  test <- mix_svm[testIndexes, ]
+  train <- mix_svm[-testIndexes, ]
+  model<-svm(class~., data=train) 
+  result_svm[[i]] <- table(test[,11], predict(model, test[,-11]))
+  accuracy_svm[i] <- sum(result_svm[[i]][row(result_svm[[i]])==col(result_svm[[i]])]/sum(result_svm[[i]]))
+  
+  table <- result_svm[[i]]
+  for (j in 1:nrow(table))
+  {
+    lead_svm[i, j] <- table[j,j]
+    recall_svm[i,j] <- table[j,j]/sum(table[j,])
+    recall_mac_svm[i] <- mean(recall_svm[i,])
+    recall_mic_svm[i, j] <- sum(table[j,])
+    precision_svm[i,j] <- table[j,j]/sum(table[,j])
+    precision_mac_svm[i] <- mean(recall_svm[i,])
+    precision_mic_svm[i, j] <- sum(table[,j])
+    f_measure_mic_svm[i, j] <- 2*((precision_svm[i, j]* recall_svm[i, j])/(precision_svm[i, j]+ recall_svm[i, j]))
+    
+  }   
+}
+
+recall_mic_svm
+precision_mic_svm
+is.nan.data.frame <- function(x)
+  do.call(cbind, lapply(x, is.nan))
+
+f_measure_mic_svm[is.nan(f_measure_mic_svm)] <- 0
+
+sum_lead_svm <- c()
+for(i in 1:8){
+  sum_lead_svm[i] <- sum(lead_svm[,i])
+}
+
+sum_recall_mic_svm <- c()
+for(i in 1:8){
+  sum_recall_mic_svm[i] <- sum(recall_mic_svm[,i])
+}
+
+fin_recall_mic_svm <- c()
+for(i in 1:8){
+  fin_recall_mic_svm[i] <- sum_lead_svm[i]/sum_recall_mic_svm[i]
+}
+
+sum_precision_mic_svm <- c()
+for(i in 1:8){
+  sum_precision_mic_svm[i] <- sum(precision_mic_svm[,i])
+}
+
+fin_precision_mic_svm <- c()
+for(i in 1:8){
+  fin_precision_mic_svm[i] <- sum_lead_svm[i]/sum_precision_mic_svm[i]
+}
+
+fin_f_measure_mic_svm <- c()
+for(i in 1:8){
+  fin_f_measure_mic_svm[i] <- mean(f_measure_mic_svm[,i])
+}
+
+
+recall_mac_svm <- colMeans(recall_svm)
+precision_mac_svm <- colMeans(precision_svm)
+
+
+fin_recall_mic_svm
+recall_mac_svm
+fin_precision_mic_svm
+precision_mac_svm
+fin_f_measure_mic_svm
+accuracy_svm
+mean(accuracy_svm)
+
+####################################################################################
+## 10 fold cross validation for Naive Bayes
+## extremely similar to the random forest model and the annotations hold
+## only exception is the model choice
+
+set.seed(750)
+mix1<-gammaDF[sample(nrow(gammaDF)),]
+
+folds <- cut(seq(1,nrow(mix1)),breaks=10,labels=FALSE)
+result <- c()
+accuracy <- c()
+recall <- matrix(NA, nrow=10, ncol=8)
+precision <- matrix(NA, nrow=10, ncol=8)
+lead <- matrix(NA, nrow=10, ncol=8)
+recall_mic <- matrix(NA, nrow=10, ncol=8)
+precision_mic <- matrix(NA, nrow=10, ncol=8)
+f_measure_mic <- matrix(NA, nrow=10, ncol=8)
+recall_mac <- c()
+precision_mac <- c()
+
+for(i in 1:10){
+  #Segement your data by fold using the which() function 
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  test <- mix1[testIndexes, ]
+  train <- mix1[-testIndexes, ]
+  model<-naiveBayes(train[,-11], train[,11]) 
+  result[[i]] <- table(test[,11], predict(model, test[,-11]))
+  accuracy[i] <- sum(result[[i]][row(result[[i]])==col(result[[i]])]/sum(result[[i]]))
+  
+  table <- result[[i]]
+  for (j in 1:nrow(table))
+  {
+    lead[i, j] <- table[j,j]
+    recall[i,j] <- table[j,j]/sum(table[j,])
+    recall_mac[i] <- mean(recall[i,])
+    recall_mic[i, j] <- sum(table[j,])
+    precision[i,j] <- table[j,j]/sum(table[,j])
+    precision_mac[i] <- mean(recall[i,])
+    precision_mic[i, j] <- sum(table[,j])
+    f_measure_mic[i, j] <- 2*((precision[i, j]* recall[i, j])/(precision[i, j]+ recall[i, j]))
+    
+  }   
+}
+
+recall_mic
+precision_mic
+is.nan.data.frame <- function(x)
+  do.call(cbind, lapply(x, is.nan))
+
+f_measure_mic[is.nan(f_measure_mic)] <- 0
+
+sum_lead <- c()
+for(i in 1:8){
+  sum_lead[i] <- sum(lead[,i])
+}
+
+sum_recall_mic <- c()
+for(i in 1:8){
+  sum_recall_mic[i] <- sum(recall_mic[,i])
+}
+
+fin_recall_mic <- c()
+for(i in 1:8){
+  fin_recall_mic[i] <- sum_lead[i]/sum_recall_mic[i]
+}
+
+sum_precision_mic <- c()
+for(i in 1:8){
+  sum_precision_mic[i] <- sum(precision_mic[,i])
+}
+
+fin_precision_mic <- c()
+for(i in 1:8){
+  fin_precision_mic[i] <- sum_lead[i]/sum_precision_mic[i]
+}
+
+fin_f_measure_mic <- c()
+for(i in 1:8){
+  fin_f_measure_mic [i] <- mean(f_measure_mic [,i])
+}
+
+recall_mac <- colMeans(recall)
+precision_mac <- colMeans(precision)
+
+fin_recall_mic
+recall_mac
+fin_precision_mic
+precision_mac
+fin_f_measure_mic
+accuracy
+mean(accuracy)
+
+################################################################################################################
+########################################################################################################################
+## Code (should you want to run it) for showing NaNs produced when you using "no class"
+data <- read.csv("C:/Users/Mr. Mosley/Desktop/Master's/Data Mining/Assignment 7/data.csv")
+
+text1.noclass <- data[,140]
+text.noclass <- data.frame(text.noclass = text1.noclass)
+
+
+textCorpus.noclass <- Corpus(VectorSource(as.character(text.noclass$text.noclass))) 
+textCorpus.noclass
+
+textCorpus.noclass <- tm_map(textCorpus.noclass, removeNumbers)
+textCorpus.noclass <- tm_map(textCorpus.noclass, tolower)
+textCorpus.noclass <- tm_map(textCorpus.noclass, removePunctuation)
+mystopwords <- c("reuter", "pct", "said", "will")
+textCorpus.noclass <- tm_map(textCorpus.noclass, stemDocument)
+textCorpus.noclass <- tm_map(textCorpus.noclass, removeWords, c(stopwords("English"), mystopwords))
+textCorpus.noclass <- tm_map(textCorpus.noclass, stripWhitespace)
+
+
+
+textCorpus.noclass <- tm_map(textCorpus.noclass, PlainTextDocument)
+dtm.noclass <- DocumentTermMatrix(textCorpus.noclass)
+dtm.noclass
+
+
+dim(dtm.noclass)
+
+dtms.noclass <- removeSparseTerms(dtm.noclass, 0.98)
+dtms.noclass
+dim(dtms.noclass)
+
+
+rowTotals.noclass <- apply(dtms.noclass , 1, sum)
+zero.noclass <- which(rowTotals.noclass==0)
+zero.noclass
+length(zero.noclass)
+
+dtms.noclass  <- dtms.noclass[rowTotals.noclass> 0, ]
+
+set.seed(999)
+lda <- LDA(dtms.noclass, 10)
+t = terms(lda,5)
+terms(lda)
+t
+
+
+topten <- c(4,23,32,39,49,59,77,112,130,134)
+classify1 <- data[,c(topten)]
+classify.pre <- data.frame(classify = classify1)
+
+name <- c("acq","corn","crude","earn","grain","interest","fx","ship","trade","wheat")
+names(classify.pre) <- name
+
+classify <- classify.pre
+classify$noclass  <- 0 
+
+classify$noclass[classify$acq == 1] <- name[1]
+classify$noclass[classify$corn == 1] <- name[2]
+classify$noclass[classify$crude == 1] <- name[3]
+classify$noclass[classify$earn == 1] <- name[4]
+classify$noclass[classify$grain == 1] <- name[5]
+classify$noclass[classify$interest == 1] <- name[6]
+classify$noclass[classify$fx == 1] <- name[7]
+classify$noclass[classify$ship == 1] <- name[8]
+classify$noclass[classify$trade == 1] <- name[9]
+classify$noclass[classify$wheat == 1] <- name[5]
+
+
+classify <- classify[-zero.noclass,]
+classify$noclass[classify$noclass == 0] <- "no class"
+
+
+gammaDF.no <- as.data.frame(lda@gamma) 
+classify$class = as.factor(classify$class)
+gammaDF.no$class <- classify$class
+
+
+model <- svm(class ~., data = gammaDF.no)
+result_SVM <- table(gammaDF.no[,11], predict(model, gammaDF.no[,-11]))
+result_SVM
+sum(result_SVM)
+accuracy_SVM <- sum(result_SVM[row(result_SVM)==col(result_SVM)]/sum(result_SVM))
+
+
+model_bayes<-naiveBayes(gammaDF.no[,-11], gammaDF.no[,11]) 
+result_bayes <- table(gammaDF.no[,11], predict(model_bayes, gammaDF.no[,-11]))
+result_bayes
+accuracy_bayes <- sum(result_bayes[row(result_bayes)==col(result_bayes)]/sum(result_bayes))
+
+model_rf<-randomForest(class~., data=gammaDF.no, ntrees=1000) 
+result_rf <- table(gammaDF.no[,11], predict(model_rf))
+result_rf
+accuracy_rf <- sum(result_rf[row(result_rf)==col(result_rf)]/sum(result_rf))
+
+
+#######################
+#cross validation of SVM which results in NaNs
+## extremely similar to the models before with the expection of one more class "no class"
+set.seed(750)
+mix_no<-gammaDF.no[sample(nrow(gammaDF.no)),]
+
+folds <- cut(seq(1,nrow(mix_no)),breaks=10,labels=FALSE)
+#Perform 10 fold cross validation
+result_no <- c()
+accuracy_no <- c()
+recall_no <- matrix(NA, nrow=10, ncol=9)
+precision_no <- matrix(NA, nrow=10, ncol=9)
+lead_no <- matrix(NA, nrow=10, ncol=9)
+recall_mic_no <- matrix(NA, nrow=10, ncol=9)
+precision_mic_no <- matrix(NA, nrow=10, ncol=9)
+f_measure_mic_no <- matrix(NA, nrow=10, ncol=9)
+recall_mac_no <- c()
+precision_mac_no <- c()
+
+
+for(i in 1:10){
+  #Segement your data by fold using the which() function 
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  test <- mix_no[testIndexes, ]
+  train <- mix_no[-testIndexes, ]
+  model<-no(class~., data=train) 
+  result_no[[i]] <- table(test[,11], predict(model, test[,-11]))
+  accuracy_no[i] <- sum(result_no[[i]][row(result_no[[i]])==col(result_no[[i]])]/sum(result_no[[i]]))
+  
+  table <- result_no[[i]]
+  for (j in 1:nrow(table))
+  {
+    lead_no[i, j] <- table[j,j]
+    recall_no[i,j] <- table[j,j]/sum(table[j,])
+    recall_mac_no[i] <- mean(recall_no[i,])
+    recall_mic_no[i, j] <- sum(table[j,])
+    precision_no[i,j] <- table[j,j]/sum(table[,j])
+    precision_mac_no[i] <- mean(recall_no[i,])
+    precision_mic_no[i, j] <- sum(table[,j])
+    f_measure_mic_no[i, j] <- 2*((precision_no[i, j]* recall_no[i, j])/(precision_no[i, j]+ recall_no[i, j]))
+    
+  }   
+}
+
+recall_mic_no
+precision_mic_no
+is.nan.data.frame <- function(x)
+  do.call(cbind, lapply(x, is.nan))
+
+f_measure_mic_no[is.nan(f_measure_mic_no)] <- 0
+
+sum_lead_no <- c()
+for(i in 1:9){
+  sum_lead_no[i] <- sum(lead_no[,i])
+}
+
+sum_recall_mic_no <- c()
+for(i in 1:9){
+  sum_recall_mic_no[i] <- sum(recall_mic_no[,i])
+}
+
+fin_recall_mic_no <- c()
+for(i in 1:9){
+  fin_recall_mic_no[i] <- sum_lead_no[i]/sum_recall_mic_no[i]
+}
+
+sum_precision_mic_no <- c()
+for(i in 1:9){
+  sum_precision_mic_no[i] <- sum(precision_mic_no[,i])
+}
+
+fin_precision_mic_no <- c()
+for(i in 1:9){
+  fin_precision_mic_no[i] <- sum_lead_no[i]/sum_precision_mic_no[i]
+}
+
+fin_f_measure_mic_no <- c()
+for(i in 1:9){
+  fin_f_measure_mic_no[i] <- mean(f_measure_mic_no[,i])
+}
+
+
+recall_mac_no <- colMeans(recall_no)
+precision_mac_no <- colMeans(precision_no)
+
+
+fin_recall_mic_no
+recall_mac_no
+fin_precision_mic_no
+precision_mac_no
+fin_f_measure_mic_no
+accuracy_no
+mean(accuracy_no)
+
+
+
