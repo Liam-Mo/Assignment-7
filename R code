@@ -2,7 +2,7 @@
 # This is obtaining topics for the entire dataset - till row 67
 
 ## read data in 
-data <- read.csv("C:/Users/Mr. Mosley/Desktop/Master's/Data Mining/Assignment 7/data.csv")
+data <- read.csv("C:/Users/Mr. ?/Desktop/Master's/Data Mining/Assignment 7/data.csv")
 
 ##library packages required to run the code
 library(tm)
